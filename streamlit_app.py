@@ -6,57 +6,61 @@ from skopt import gp_minimize
 from skopt.space import Real
 
 # 保存先ファイル
-CSV_FILE = "experiment_notes.csv"
+CSV_FILE = "experiment_data.csv"
 
 # 初期化：CSVがなければ作成
 if not os.path.exists(CSV_FILE):
-    df = pd.DataFrame(columns=["日付", "条件", "結果"])
+    df = pd.DataFrame(columns=["条件", "結果"])
     df.to_csv(CSV_FILE, index=False, encoding="utf-8")
 
 # ページ設定
 st.set_page_config(page_title="Autonoma", layout="centered")
 
 # サイドバーでページ選択
-page = st.sidebar.radio("📑 目次", ["ノート", "解析"])
+page = st.sidebar.radio("📑 目次", ["ノート", "データ入力", "解析"])
 
 # ==========================================================
-# 📒 実験ノートページ
+# 📒 実験ノートページ（自由記述）
 # ==========================================================
 if page == "ノート":
     st.title("📝 実験ノート - Autonoma")
 
-    # 実験入力フォーム
     with st.form("note_form"):
-        condition = st.number_input("⚙️ 実験条件（数値）", min_value=0.0, max_value=1000.0, step=1.0)
-        result = st.number_input("📊 実験結果（スコアなど）", step=1.0, format="%.2f")
+        purpose = st.text_area("🎯 実験の目的")
+        result_txt = st.text_area("📊 実験の結果（自由記述）")
+        discussion = st.text_area("💡 考察")
 
         submitted = st.form_submit_button("保存")
-
         if submitted:
-            new_note = pd.DataFrame([{
-                "日付": str(date.today()),
-                "条件": condition,
-                "結果": result
-            }])
-            df = pd.read_csv(CSV_FILE)
-            df = pd.concat([df, new_note], ignore_index=True)
-            df.to_csv(CSV_FILE, index=False, encoding="utf-8")
-            st.success("✅ 実験ノートを保存しました！")
+            # テキストノートは保存せず、その場で表示（CSVに混ぜない）
+            st.success("✅ 実験ノートを保存しました！（セッション中のみ保持）")
+            st.write("### 📒 保存されたノート")
+            st.write(f"**目的**: {purpose}")
+            st.write(f"**結果**: {result_txt}")
+            st.write(f"**考察**: {discussion}")
 
-    # 保存されたノート一覧
-    st.subheader("📒 実験ノート一覧")
+# ==========================================================
+# 📂 実験データ入力（数値）
+# ==========================================================
+elif page == "データ入力":
+    st.title("📂 実験データ入力 - Autonoma")
+
+    with st.form("data_form"):
+        condition = st.number_input("⚙️ 実験条件（数値）", min_value=0.0, max_value=1000.0, step=1.0)
+        result = st.number_input("📊 実験結果（数値）", step=1.0, format="%.2f")
+
+        submitted = st.form_submit_button("CSVに保存")
+        if submitted:
+            new_data = pd.DataFrame([{"条件": condition, "結果": result}])
+            df = pd.read_csv(CSV_FILE)
+            df = pd.concat([df, new_data], ignore_index=True)
+            df.to_csv(CSV_FILE, index=False, encoding="utf-8")
+            st.success("✅ 実験データをCSVに保存しました！")
+
+    # 保存されたデータ一覧
+    st.subheader("📊 実験データ一覧")
     df = pd.read_csv(CSV_FILE)
     st.dataframe(df)
-
-    # ノート削除
-    if not df.empty:
-        st.subheader("🗑️ ノート削除")
-        delete_index = st.number_input("削除したい行番号を指定してください", min_value=0, max_value=len(df)-1, step=1)
-        if st.button("削除"):
-            df = df.drop(delete_index).reset_index(drop=True)
-            df.to_csv(CSV_FILE, index=False, encoding="utf-8")
-            st.success(f"行 {delete_index} を削除しました。")
-            st.experimental_rerun()
 
 # ==========================================================
 # 🔮 解析ページ（ベイズ最適化）
@@ -95,5 +99,3 @@ elif page == "解析":
         st.success(f"🧪 推奨される次の条件: {res.x[0]:.2f}")
     else:
         st.info("⚠️ ベイズ最適化には少なくとも3件以上のデータが必要です。")
-
-
