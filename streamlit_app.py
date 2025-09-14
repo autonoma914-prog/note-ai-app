@@ -15,66 +15,85 @@ if not os.path.exists(CSV_FILE):
 
 # ページ設定
 st.set_page_config(page_title="Autonoma", layout="centered")
-st.title("🤖 Autonoma")
 
-# ---------------------------------------------
-# 実験記録フォーム
-# ---------------------------------------------
-st.header("📝 実験を記録する")
+# サイドバーでページ選択
+page = st.sidebar.radio("📑 目次", ["ノート", "解析"])
 
-with st.form("note_form"):
-    condition = st.number_input("⚙️ 実験条件（数値）", min_value=0.0, max_value=1000.0, step=1.0)
-    result = st.number_input("📊 実験結果（スコアなど）", step=1.0, format="%.2f")
+# ==========================================================
+# 📒 実験ノートページ
+# ==========================================================
+if page == "ノート":
+    st.title("📝 実験ノート - Autonoma")
 
-    submitted = st.form_submit_button("保存")
+    # 実験入力フォーム
+    with st.form("note_form"):
+        condition = st.number_input("⚙️ 実験条件（数値）", min_value=0.0, max_value=1000.0, step=1.0)
+        result = st.number_input("📊 実験結果（スコアなど）", step=1.0, format="%.2f")
 
-    if submitted:
-        new_note = pd.DataFrame([{
-            "日付": str(date.today()),
-            "条件": condition,
-            "結果": result
-        }])
-        df = pd.read_csv(CSV_FILE)
-        df = pd.concat([df, new_note], ignore_index=True)
-        df.to_csv(CSV_FILE, index=False, encoding="utf-8")
-        st.success("✅ 実験ノートを保存しました！")
+        submitted = st.form_submit_button("保存")
 
-# 保存されたノート一覧を表示
-st.subheader("📒 実験ノート一覧")
-df = pd.read_csv(CSV_FILE)
-st.dataframe(df)
+        if submitted:
+            new_note = pd.DataFrame([{
+                "日付": str(date.today()),
+                "条件": condition,
+                "結果": result
+            }])
+            df = pd.read_csv(CSV_FILE)
+            df = pd.concat([df, new_note], ignore_index=True)
+            df.to_csv(CSV_FILE, index=False, encoding="utf-8")
+            st.success("✅ 実験ノートを保存しました！")
 
-# ---------------------------------------------
-# ベイズ最適化で次の条件を提案
-# ---------------------------------------------
-st.header("🔮 次の実験条件を提案する")
+    # 保存されたノート一覧
+    st.subheader("📒 実験ノート一覧")
+    df = pd.read_csv(CSV_FILE)
+    st.dataframe(df)
 
-if len(df) >= 3:  # データがある程度溜まってから実行
-    X = df[["条件"]].values.tolist()
-    y = df["結果"].values.tolist()
+    # ノート削除
+    if not df.empty:
+        st.subheader("🗑️ ノート削除")
+        delete_index = st.number_input("削除したい行番号を指定してください", min_value=0, max_value=len(df)-1, step=1)
+        if st.button("削除"):
+            df = df.drop(delete_index).reset_index(drop=True)
+            df.to_csv(CSV_FILE, index=False, encoding="utf-8")
+            st.success(f"行 {delete_index} を削除しました。")
+            st.experimental_rerun()
 
-    # 目的関数（結果を最小化する形式にする）
-    def objective(x):
-        idx = [row[0] for row in X].index(x[0]) if x[0] in [row[0] for row in X] else -1
-        if idx >= 0:
-            return y[idx]
-        else:
-            return 0  # 未知の場合は仮の値
+# ==========================================================
+# 🔮 解析ページ（ベイズ最適化）
+# ==========================================================
+elif page == "解析":
+    st.title("🔮 解析 - Autonoma")
 
-    # 探索範囲を設定
-    space = [Real(0.0, 1000.0, name="condition")]
+    df = pd.read_csv(CSV_FILE)
+    st.subheader("📊 現在のデータ")
+    st.dataframe(df)
 
-    res = gp_minimize(
-        objective,
-        space,
-        x0=X,
-        y0=y,
-        n_calls=len(X) + 5,
-        random_state=42
-    )
+    # ベイズ最適化を実行
+    st.subheader("✨ 次の実験条件を提案")
+    if len(df) >= 3:
+        X = df[["条件"]].values.tolist()
+        y = df["結果"].values.tolist()
 
-    st.success(f"✨ 次の推奨条件: {res.x[0]:.2f}")
+        def objective(x):
+            idx = [row[0] for row in X].index(x[0]) if x[0] in [row[0] for row in X] else -1
+            if idx >= 0:
+                return y[idx]
+            else:
+                return 0
 
-else:
-    st.info("⚠️ ベイズ最適化を実行するには、少なくとも3件以上の実験データが必要です。")
+        space = [Real(0.0, 1000.0, name="condition")]
+
+        res = gp_minimize(
+            objective,
+            space,
+            x0=X,
+            y0=y,
+            n_calls=len(X) + 5,
+            random_state=42
+        )
+
+        st.success(f"🧪 推奨される次の条件: {res.x[0]:.2f}")
+    else:
+        st.info("⚠️ ベイズ最適化には少なくとも3件以上のデータが必要です。")
+
 
