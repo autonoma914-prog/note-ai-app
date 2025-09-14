@@ -4,98 +4,122 @@ from datetime import date
 import os
 from skopt import gp_minimize
 from skopt.space import Real
+import matplotlib.pyplot as plt
 
 # 保存先ファイル
+NOTE_FILE = "notes.csv"
 CSV_FILE = "experiment_data.csv"
 
-# 初期化：CSVがなければ作成
+# 初期化：ファイルがなければ作る
+if not os.path.exists(NOTE_FILE):
+    df = pd.DataFrame(columns=["日付", "目的", "結果", "考察"])
+    df.to_csv(NOTE_FILE, index=False, encoding="utf-8")
+
 if not os.path.exists(CSV_FILE):
     df = pd.DataFrame(columns=["条件", "結果"])
     df.to_csv(CSV_FILE, index=False, encoding="utf-8")
 
 # ページ設定
 st.set_page_config(page_title="Autonoma", layout="centered")
+st.title("🤖 Autonoma")
 
-# サイドバーでページ選択
-page = st.sidebar.radio("📑 目次", ["ノート", "データ入力", "解析"])
+# タブ分け
+tab1, tab2 = st.tabs(["📝 実験ノート", "📊 解析"])
 
-# ==========================================================
-# 📒 実験ノートページ（自由記述）
-# ==========================================================
-if page == "ノート":
-    st.title("📝 実験ノート - Autonoma")
+# =========================
+# 📝 実験ノート
+# =========================
+with tab1:
+    st.subheader("新しい実験ノートを追加")
 
     with st.form("note_form"):
-        purpose = st.text_area("🎯 実験の目的")
-        result_txt = st.text_area("📊 実験の結果（自由記述）")
+        purpose = st.text_area("🎯 目的")
+        result_text = st.text_area("📊 結果")
         discussion = st.text_area("💡 考察")
 
         submitted = st.form_submit_button("保存")
+
         if submitted:
-            # テキストノートは保存せず、その場で表示（CSVに混ぜない）
-            st.success("✅ 実験ノートを保存しました！（セッション中のみ保持）")
-            st.write("### 📒 保存されたノート")
-            st.write(f"**目的**: {purpose}")
-            st.write(f"**結果**: {result_txt}")
-            st.write(f"**考察**: {discussion}")
+            new_note = pd.DataFrame([{
+                "日付": str(date.today()),
+                "目的": purpose,
+                "結果": result_text,
+                "考察": discussion
+            }])
 
-# ==========================================================
-# 📂 実験データ入力（数値）
-# ==========================================================
-elif page == "データ入力":
-    st.title("📂 実験データ入力 - Autonoma")
+            df = pd.read_csv(NOTE_FILE)
+            df = pd.concat([df, new_note], ignore_index=True)
+            df.to_csv(NOTE_FILE, index=False, encoding="utf-8")
+            st.success("✅ 実験ノートを保存しました！")
 
-    with st.form("data_form"):
-        condition = st.number_input("⚙️ 実験条件（数値）", min_value=0.0, max_value=1000.0, step=1.0)
-        result = st.number_input("📊 実験結果（数値）", step=1.0, format="%.2f")
+    st.subheader("📒 実験ノート一覧")
+    notes = pd.read_csv(NOTE_FILE)
+    st.dataframe(notes)
 
-        submitted = st.form_submit_button("CSVに保存")
-        if submitted:
-            new_data = pd.DataFrame([{"条件": condition, "結果": result}])
+    # ノート削除機能
+    if not notes.empty:
+        delete_index = st.number_input("削除するノートの番号を指定", min_value=0, max_value=len(notes)-1, step=1)
+        if st.button("🗑️ 削除"):
+            notes = notes.drop(delete_index).reset_index(drop=True)
+            notes.to_csv(NOTE_FILE, index=False, encoding="utf-8")
+            st.success("✅ 指定したノートを削除しました")
+
+    st.subheader("条件と結果を記入 (CSV用)")
+    with st.form("csv_form"):
+        condition = st.number_input("⚙️ 条件", step=1.0, format="%.2f")
+        result_val = st.number_input("📊 結果", step=1.0, format="%.2f")
+
+        submitted_csv = st.form_submit_button("CSVに保存")
+
+        if submitted_csv:
+            new_data = pd.DataFrame([{"条件": condition, "結果": result_val}])
             df = pd.read_csv(CSV_FILE)
             df = pd.concat([df, new_data], ignore_index=True)
             df.to_csv(CSV_FILE, index=False, encoding="utf-8")
-            st.success("✅ 実験データをCSVに保存しました！")
+            st.success("✅ 条件と結果を保存しました！")
 
-    # 保存されたデータ一覧
-    st.subheader("📊 実験データ一覧")
+    st.subheader("📑 実験データ (CSV)")
+    data = pd.read_csv(CSV_FILE)
+    st.dataframe(data)
+
+# =========================
+# 📊 解析 (ベイズ最適化付き)
+# =========================
+with tab2:
+    st.subheader("✨ 次の実験条件を提案します")
+
     df = pd.read_csv(CSV_FILE)
-    st.dataframe(df)
 
-# ==========================================================
-# 🔮 解析ページ（ベイズ最適化）
-# ==========================================================
-elif page == "解析":
-    st.title("🔮 解析 - Autonoma")
-
-    df = pd.read_csv(CSV_FILE)
-    st.subheader("📊 現在のデータ")
-    st.dataframe(df)
-
-    # ベイズ最適化を実行
-    st.subheader("✨ 次の実験条件を提案")
-    if len(df) >= 3:
+    if df.empty or len(df) < 3:
+        st.warning("📉 データ点数が少ないです。もう少しデータを追加してください。")
+    else:
         X = df[["条件"]].values.tolist()
         y = df["結果"].values.tolist()
 
+        # 目的関数（ベイズ最適化用）
         def objective(x):
-            idx = [row[0] for row in X].index(x[0]) if x[0] in [row[0] for row in X] else -1
-            if idx >= 0:
-                return y[idx]
-            else:
-                return 0
+            idx = min(range(len(X)), key=lambda i: abs(X[i][0] - x[0]))
+            return y[idx]
 
-        space = [Real(0.0, 1000.0, name="condition")]
+        space = [Real(min(df["条件"]), max(df["条件"]), name="condition")]
+        n_calls = max(len(X) + 5, 15)
 
         res = gp_minimize(
             objective,
             space,
             x0=X,
             y0=y,
-            n_calls=len(X) + 5,
+            n_calls=n_calls,
             random_state=42
         )
 
-        st.success(f"🧪 推奨される次の条件: {res.x[0]:.2f}")
-    else:
-        st.info("⚠️ ベイズ最適化には少なくとも3件以上のデータが必要です。")
+        st.success(f"🔮 提案された次の条件: {res.x[0]:.2f}")
+
+        # 散布図を表示
+        fig, ax = plt.subplots()
+        ax.scatter(df["条件"], df["結果"], c="blue", label="実験データ")
+        ax.set_xlabel("条件")
+        ax.set_ylabel("結果")
+        ax.set_title("条件 vs 結果")
+        ax.legend()
+        st.pyplot(fig)
