@@ -141,8 +141,10 @@ with tab2:
             st.warning("📉 データ点数が少ないです。もう少しデータを追加してください。")
         else:
             if st.button("🚀 解析スタート"):
-                X = df[selected_conditions].dropna().values.tolist()
-                y = df.loc[df[selected_conditions].notnull().all(axis=1), "結果"].tolist()
+                # 欠損を除外
+                df_valid = df.dropna(subset=selected_conditions + ["結果"])
+                X = df_valid[selected_conditions].values.tolist()
+                y = df_valid["結果"].tolist()
 
                 if len(X) < 3:
                     st.error("❌ 選択した条件に有効なデータが十分ありません。")
@@ -151,39 +153,36 @@ with tab2:
                         y = [-val for val in y]
 
                     # スペースを選択した条件だけで構築
-                    space = [Real(min(df[col]), max(df[col]), name=col) for col in selected_conditions if df[col].notnull().any()]
+                    space = [Real(min(df_valid[col]), max(df_valid[col]), name=col) for col in selected_conditions]
 
-                    if not space:
-                        st.error("❌ 有効な条件データが選択されていません。")
-                    else:
-                        # ダミー目的関数を削除し、y0を直接利用
-                        res = gp_minimize(
-                            func=lambda x: 0.0,  # 必須だが使わない
-                            dimensions=space,
-                            x0=X,
-                            y0=y,
-                            n_calls=max(len(X)+5, 20),
-                            random_state=42
-                        )
+                    # gp_minimize を実データで直接学習
+                    res = gp_minimize(
+                        func=None,
+                        dimensions=space,
+                        x0=X,
+                        y0=y,
+                        n_calls=max(len(X)+5, 20),
+                        random_state=42
+                    )
 
-                        proposed = res.x
-                        st.success("🔮 提案された次の条件:" + ", ".join([f"{col}={val:.2f}" for col, val in zip(selected_conditions, proposed)]))
+                    proposed = res.x
+                    st.success("🔮 提案された次の条件:" + ", ".join([f"{col}={val:.2f}" for col, val in zip(selected_conditions, proposed)]))
 
-                        # 可視化モード選択
-                        viz_mode = st.radio("可視化方法", ["散布図", "履歴曲線"])
+                    # 可視化モード選択
+                    viz_mode = st.radio("可視化方法", ["散布図", "履歴曲線"])
 
-                        if viz_mode == "散布図" and selected_conditions:
-                            fig, ax = plt.subplots()
-                            ax.scatter(df[selected_conditions[0]], df["結果"], c="blue", label="実験データ")
-                            ax.set_xlabel(selected_conditions[0])
-                            ax.set_ylabel("結果")
-                            ax.set_title(f"{selected_conditions[0]} vs 結果")
-                            st.pyplot(fig)
+                    if viz_mode == "散布図" and selected_conditions:
+                        fig, ax = plt.subplots()
+                        ax.scatter(df_valid[selected_conditions[0]], df_valid["結果"], c="blue", label="実験データ")
+                        ax.set_xlabel(selected_conditions[0])
+                        ax.set_ylabel("結果")
+                        ax.set_title(f"{selected_conditions[0]} vs 結果")
+                        st.pyplot(fig)
 
-                        elif viz_mode == "履歴曲線":
-                            fig, ax = plt.subplots()
-                            ax.plot(range(1, len(y)+1), y, marker="o")
-                            ax.set_xlabel("試行回数")
-                            ax.set_ylabel("結果")
-                            ax.set_title("最適化履歴")
-                            st.pyplot(fig)
+                    elif viz_mode == "履歴曲線":
+                        fig, ax = plt.subplots()
+                        ax.plot(range(1, len(y)+1), y, marker="o")
+                        ax.set_xlabel("試行回数")
+                        ax.set_ylabel("結果")
+                        ax.set_title("最適化履歴")
+                        st.pyplot(fig)
