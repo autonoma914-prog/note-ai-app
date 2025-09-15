@@ -1,26 +1,41 @@
 import streamlit as st
 import pandas as pd
-from datetime import date, datetime
+from datetime import date
 import os
 from skopt import gp_minimize
 from skopt.space import Real
 import matplotlib.pyplot as plt
-import seaborn as sns
+import numpy as np
 
 # 保存先ファイル
 NOTE_FILE = "notes.csv"
 CSV_FILE = "experiment_data.csv"
 
-# 初期化
+# =========================
+# 初期化とフォーマット修正
+# =========================
 if not os.path.exists(NOTE_FILE):
     df = pd.DataFrame(columns=["実験ID", "日付", "目的", "結果", "考察"])
     df.to_csv(NOTE_FILE, index=False, encoding="utf-8")
 
+expected_cols = ["実験ID", "条件1", "条件2", "条件3", "結果"]
 if not os.path.exists(CSV_FILE):
-    df = pd.DataFrame(columns=["実験ID", "条件1", "条件2", "条件3", "結果"])
+    df = pd.DataFrame(columns=expected_cols)
     df.to_csv(CSV_FILE, index=False, encoding="utf-8")
+else:
+    df = pd.read_csv(CSV_FILE)
+    if list(df.columns) != expected_cols:
+        if "条件" in df.columns and "結果" in df.columns:
+            df = df.rename(columns={"条件": "条件1"})
+            df["条件2"] = 0.0
+            df["条件3"] = 0.0
+            df["実験ID"] = [f"legacy-{i+1:03d}" for i in range(len(df))]
+            df = df[expected_cols]
+            df.to_csv(CSV_FILE, index=False, encoding="utf-8")
 
+# =========================
 # ページ設定
+# =========================
 st.set_page_config(page_title="Autonoma", layout="centered")
 st.title("Autonoma")
 
@@ -87,13 +102,15 @@ with tab1:
     st.dataframe(data)
 
     # --- グラフ描画 ---
-    if not data.empty:
+    if "条件1" in data.columns and "結果" in data.columns:
         fig, ax = plt.subplots()
         ax.scatter(data["条件1"], data["結果"], c="blue")
         ax.set_xlabel("条件1")
         ax.set_ylabel("結果")
         ax.set_title("条件1 vs 結果")
         st.pyplot(fig)
+    else:
+        st.warning("⚠️ データ形式が古いため、グラフを描画できません。")
 
 # =========================
 # 📊 解析 (ベイズ最適化付き)
@@ -113,7 +130,7 @@ with tab2:
             y = df["結果"].tolist()
 
             if mode == "最大化":
-                y = [-val for val in y]  # gp_minimizeは最小化なので符号反転
+                y = [-val for val in y]
 
             space = [
                 Real(min(df["条件1"]), max(df["条件1"]), name="条件1"),
@@ -122,7 +139,7 @@ with tab2:
             ]
 
             res = gp_minimize(
-                lambda x: None,  # 予測モデルで評価するのでダミー
+                lambda x: None,
                 space,
                 x0=X,
                 y0=y,
@@ -148,7 +165,12 @@ with tab2:
                 if len(df) > 5:
                     pivot_df = df.pivot_table(index="条件1", columns="条件2", values="結果", aggfunc="mean")
                     fig, ax = plt.subplots()
-                    sns.heatmap(pivot_df, cmap="viridis", ax=ax)
+                    c = ax.imshow(pivot_df, cmap="viridis", aspect="auto")
+                    fig.colorbar(c, ax=ax)
+                    ax.set_xticks(np.arange(len(pivot_df.columns)))
+                    ax.set_yticks(np.arange(len(pivot_df.index)))
+                    ax.set_xticklabels(pivot_df.columns)
+                    ax.set_yticklabels(pivot_df.index)
                     st.pyplot(fig)
                 else:
                     st.warning("📉 データ点数が少ないため、ヒートマップを生成できません。")
