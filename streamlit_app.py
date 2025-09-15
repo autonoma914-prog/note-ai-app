@@ -12,26 +12,22 @@ NOTE_FILE = "notes.csv"
 CSV_FILE = "experiment_data.csv"
 
 # =========================
+# 動的な条件数の管理
+# =========================
+if "num_conditions" not in st.session_state:
+    st.session_state.num_conditions = 1  # 最初は条件1だけ
+
+# =========================
 # 初期化とフォーマット修正
 # =========================
 if not os.path.exists(NOTE_FILE):
     df = pd.DataFrame(columns=["実験ID", "日付", "目的", "結果", "考察"])
     df.to_csv(NOTE_FILE, index=False, encoding="utf-8")
 
-expected_cols = ["実験ID", "条件1", "条件2", "条件3", "結果"]
 if not os.path.exists(CSV_FILE):
-    df = pd.DataFrame(columns=expected_cols)
+    cols = ["実験ID"] + [f"条件{i+1}" for i in range(st.session_state.num_conditions)] + ["結果"]
+    df = pd.DataFrame(columns=cols)
     df.to_csv(CSV_FILE, index=False, encoding="utf-8")
-else:
-    df = pd.read_csv(CSV_FILE)
-    if list(df.columns) != expected_cols:
-        if "条件" in df.columns and "結果" in df.columns:
-            df = df.rename(columns={"条件": "条件1"})
-            df["条件2"] = 0.0
-            df["条件3"] = 0.0
-            df["実験ID"] = [f"legacy-{i+1:03d}" for i in range(len(df))]
-            df = df[expected_cols]
-            df.to_csv(CSV_FILE, index=False, encoding="utf-8")
 
 # =========================
 # ページ設定
@@ -75,10 +71,18 @@ with tab1:
 
     # --- 条件と結果を記入 ---
     st.subheader("条件と結果を記入 (CSV用)")
+
+    # 条件入力欄を動的に生成
     with st.form("csv_form"):
-        condition1 = st.number_input("⚙️ 条件1", step=1.0, format="%.2f")
-        condition2 = st.number_input("⚙️ 条件2", step=1.0, format="%.2f")
-        condition3 = st.number_input("⚙️ 条件3", step=1.0, format="%.2f")
+        conditions = []
+        for i in range(st.session_state.num_conditions):
+            val = st.number_input(f"⚙️ 条件{i+1}", step=1.0, format="%.2f", key=f"cond_{i}")
+            conditions.append(val)
+
+        if st.form_submit_button("＋ 条件を追加"):
+            st.session_state.num_conditions += 1
+            st.experimental_rerun()
+
         result_val = st.number_input("📊 結果", step=1.0, format="%.2f")
 
         submitted_csv = st.form_submit_button("CSVに保存")
@@ -86,13 +90,18 @@ with tab1:
         if submitted_csv:
             data_df = pd.read_csv(CSV_FILE)
             exp_id = f"{date.today().strftime('%Y%m%d')}-{len(data_df)+1:02d}"
-            new_data = pd.DataFrame([{
-                "実験ID": exp_id,
-                "条件1": condition1,
-                "条件2": condition2,
-                "条件3": condition3,
-                "結果": result_val
-            }])
+            row = {"実験ID": exp_id}
+            for i, val in enumerate(conditions):
+                row[f"条件{i+1}"] = val
+            row["結果"] = result_val
+
+            new_data = pd.DataFrame([row])
+
+            # 足りない列を埋める
+            for col in row.keys():
+                if col not in data_df.columns:
+                    data_df[col] = np.nan
+
             data_df = pd.concat([data_df, new_data], ignore_index=True)
             data_df.to_csv(CSV_FILE, index=False, encoding="utf-8")
             st.success(f"✅ 条件と結果を保存しました！（ID: {exp_id}）")
@@ -100,17 +109,6 @@ with tab1:
     st.subheader("📑 実験データ (CSV)")
     data = pd.read_csv(CSV_FILE)
     st.dataframe(data)
-
-    # --- グラフ描画 ---
-    if "条件1" in data.columns and "結果" in data.columns:
-        fig, ax = plt.subplots()
-        ax.scatter(data["条件1"], data["結果"], c="blue")
-        ax.set_xlabel("条件1")
-        ax.set_ylabel("結果")
-        ax.set_title("条件1 vs 結果")
-        st.pyplot(fig)
-    else:
-        st.warning("⚠️ データ形式が古いため、グラフを描画できません。")
 
 # =========================
 # 📊 解析 (ベイズ最適化付き)
@@ -122,21 +120,19 @@ with tab2:
 
     mode = st.radio("最適化の目的を選択", ["最大化", "最小化"])
 
+    condition_cols = [col for col in df.columns if col.startswith("条件")]
+
     if df.empty or len(df) < 3:
         st.warning("📉 データ点数が少ないです。もう少しデータを追加してください。")
     else:
         if st.button("🚀 解析スタート"):
-            X = df[["条件1", "条件2", "条件3"]].values.tolist()
+            X = df[condition_cols].values.tolist()
             y = df["結果"].tolist()
 
             if mode == "最大化":
                 y = [-val for val in y]
 
-            space = [
-                Real(min(df["条件1"]), max(df["条件1"]), name="条件1"),
-                Real(min(df["条件2"]), max(df["条件2"]), name="条件2"),
-                Real(min(df["条件3"]), max(df["条件3"]), name="条件3")
-            ]
+            space = [Real(min(df[col]), max(df[col]), name=col) for col in condition_cols]
 
             res = gp_minimize(
                 lambda x: None,
@@ -148,32 +144,18 @@ with tab2:
             )
 
             proposed = res.x
-            st.success(f"🔮 提案された次の条件: 条件1={proposed[0]:.2f}, 条件2={proposed[1]:.2f}, 条件3={proposed[2]:.2f}")
+            st.success("🔮 提案された次の条件:" + ", ".join([f"{col}={val:.2f}" for col, val in zip(condition_cols, proposed)]))
 
             # 可視化モード選択
-            viz_mode = st.radio("可視化方法", ["散布図", "ヒートマップ（条件1 vs 条件2）", "履歴曲線"])
+            viz_mode = st.radio("可視化方法", ["散布図", "履歴曲線"])
 
             if viz_mode == "散布図":
                 fig, ax = plt.subplots()
-                ax.scatter(df["条件1"], df["結果"], c="blue", label="実験データ")
-                ax.set_xlabel("条件1")
+                ax.scatter(df[condition_cols[0]], df["結果"], c="blue", label="実験データ")
+                ax.set_xlabel(condition_cols[0])
                 ax.set_ylabel("結果")
-                ax.set_title("条件1 vs 結果")
+                ax.set_title(f"{condition_cols[0]} vs 結果")
                 st.pyplot(fig)
-
-            elif viz_mode == "ヒートマップ（条件1 vs 条件2）":
-                if len(df) > 5:
-                    pivot_df = df.pivot_table(index="条件1", columns="条件2", values="結果", aggfunc="mean")
-                    fig, ax = plt.subplots()
-                    c = ax.imshow(pivot_df, cmap="viridis", aspect="auto")
-                    fig.colorbar(c, ax=ax)
-                    ax.set_xticks(np.arange(len(pivot_df.columns)))
-                    ax.set_yticks(np.arange(len(pivot_df.index)))
-                    ax.set_xticklabels(pivot_df.columns)
-                    ax.set_yticklabels(pivot_df.index)
-                    st.pyplot(fig)
-                else:
-                    st.warning("📉 データ点数が少ないため、ヒートマップを生成できません。")
 
             elif viz_mode == "履歴曲線":
                 fig, ax = plt.subplots()
@@ -182,17 +164,3 @@ with tab2:
                 ax.set_ylabel("結果")
                 ax.set_title("最適化履歴")
                 st.pyplot(fig)
-
-# =========================
-# 🔄 データ共有・同期機能（簡易）
-# =========================
-st.sidebar.subheader("データ共有・アップロード")
-uploaded_file = st.sidebar.file_uploader("CSVファイルをアップロード")
-if uploaded_file:
-    new_df = pd.read_csv(uploaded_file)
-    new_df.to_csv(CSV_FILE, index=False, encoding="utf-8")
-    st.sidebar.success("✅ データをアップロードしました")
-
-uploaded_img = st.sidebar.file_uploader("画像をアップロード", type=["png", "jpg", "jpeg"])
-if uploaded_img:
-    st.sidebar.image(uploaded_img, caption="アップロード画像", use_column_width=True)
