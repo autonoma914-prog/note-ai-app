@@ -72,14 +72,15 @@ with tab1:
     # --- 条件と結果を記入 ---
     st.subheader("条件と結果を記入 (CSV用)")
 
-    # 条件入力欄を動的に生成
     with st.form("csv_form"):
         conditions = []
+        # 最初は条件1のみを表示、追加されたらその数だけ表示
         for i in range(st.session_state.num_conditions):
             val = st.number_input(f"⚙️ 条件{i+1}", step=1.0, format="%.2f", key=f"cond_{i}")
             conditions.append(val)
 
-        if st.form_submit_button("＋ 条件を追加"):
+        add_condition = st.form_submit_button("＋ 条件を追加")
+        if add_condition:
             st.session_state.num_conditions += 1
             st.experimental_rerun()
 
@@ -149,7 +150,7 @@ with tab2:
             # 可視化モード選択
             viz_mode = st.radio("可視化方法", ["散布図", "履歴曲線"])
 
-            if viz_mode == "散布図":
+            if viz_mode == "散布図" and condition_cols:
                 fig, ax = plt.subplots()
                 ax.scatter(df[condition_cols[0]], df["結果"], c="blue", label="実験データ")
                 ax.set_xlabel(condition_cols[0])
