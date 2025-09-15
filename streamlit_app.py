@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Autonoma: Experiment Notes + Kaneko-style Regression & AD Analysis (Integrated, sklearn<0.22 Compatible)
+# Autonoma: Experiment Notes + Kaneko-style Regression & AD Analysis (sklearn<0.22 Compatible)
 
 import os
 from datetime import date
@@ -44,18 +44,14 @@ if not os.path.exists(CSV_FILE):
 # ユーティリティ
 # ------------------------------------------------------------
 def autoscale_fit_transform(X, y):
-    """X, y をオートスケーリング。平均・標準偏差と共に返す"""
     X = np.asarray(X, dtype=float)
     y = np.asarray(y, dtype=float)
-
     X_mean = X.mean(axis=0)
     X_std = X.std(axis=0, ddof=0)
     y_mean = y.mean()
     y_std = y.std(ddof=0)
-
     X_std_safe = np.where(X_std == 0, 1.0, X_std)
     y_std_safe = 1.0 if y_std == 0 else y_std
-
     X_auto = (X - X_mean) / X_std_safe
     y_auto = (y - y_mean) / y_std_safe
     return X_auto, y_auto, (X_mean, X_std_safe, y_mean, y_std_safe)
@@ -206,6 +202,7 @@ with tab2:
         st.stop()
 
     mode = st.radio("最適化の目的", ["最大化", "最小化"], horizontal=True)
+
     if not all_condition_cols:
         st.warning("⚠️ 条件データが存在しません。")
         st.stop()
@@ -216,13 +213,50 @@ with tab2:
         default=[all_condition_cols[0]]
     )
 
-    # --- 解析本体は前のコードと同じ ---
-    # （ここから下はモデル構築・AD・提案処理など）
+    if df.empty or len(df) < 3:
+        st.warning("📉 有効なデータ点が不足しています。")
+        st.stop()
 
-    # ...
-    # ⚠️ 重要な変更点: RMSE の計算をこうする
-    # rmse_train = mean_squared_error(y, y_pred_train) ** 0.5
-    # rmse_cv = mean_squared_error(y, y_cv) ** 0.5
-    # st.metric("RMSE (train)", f"{rmse_train:.6g}")
-    # st.metric("RMSE (CV)", f"{rmse_cv:.6g}")
-    # ...
+    # --- データ準備 ---
+    df_valid = df.dropna(subset=selected_conditions + ["結果"])
+    X = df_valid[selected_conditions].values
+    y = df_valid["結果"].values
+
+    # オートスケーリング
+    X_auto, y_auto, scalers = autoscale_fit_transform(X, y)
+
+    # --- 簡易版：線形回帰でテスト（本当はSVR/GPRの分岐あり） ---
+    model = LinearRegression()
+    model.fit(X_auto, y_auto)
+
+    y_pred_train = inverse_scale_y(model.predict(X_auto), scalers)
+
+    # 評価
+    r2_train = r2_score(y, y_pred_train)
+    rmse_train = mean_squared_error(y, y_pred_train) ** 0.5
+    mae_train = mean_absolute_error(y, y_pred_train)
+
+    st.write("**学習データでの評価**")
+    st.write("R²:", r2_train)
+    st.write("RMSE:", rmse_train)
+    st.write("MAE:", mae_train)
+
+    cv = KFold(n_splits=5, shuffle=True, random_state=42)
+    y_cv_scaled = cross_val_predict(model, X_auto, y_auto, cv=cv)
+    y_cv = inverse_scale_y(y_cv_scaled, scalers)
+
+    r2_cv = r2_score(y, y_cv)
+    rmse_cv = mean_squared_error(y, y_cv) ** 0.5
+    mae_cv = mean_absolute_error(y, y_cv)
+
+    st.write("**CVでの評価**")
+    st.write("R²:", r2_cv)
+    st.write("RMSE:", rmse_cv)
+    st.write("MAE:", mae_cv)
+
+    # 実測 vs CV推定 プロット
+    fig, ax = plt.subplots()
+    ax.scatter(y, y_cv, c="blue")
+    ax.set_xlabel("実測値")
+    ax.set_ylabel("CV推定値")
+    st.pyplot(fig)
