@@ -18,15 +18,14 @@ if "num_conditions" not in st.session_state:
     st.session_state.num_conditions = 1  # 最初は条件1だけ
 
 # =========================
-# 初期化とフォーマット修正
+# 初期化
 # =========================
 if not os.path.exists(NOTE_FILE):
     df = pd.DataFrame(columns=["実験ID", "日付", "目的", "結果", "考察"])
     df.to_csv(NOTE_FILE, index=False, encoding="utf-8")
 
 if not os.path.exists(CSV_FILE):
-    cols = ["実験ID"] + [f"条件{i+1}" for i in range(st.session_state.num_conditions)] + ["結果"]
-    df = pd.DataFrame(columns=cols)
+    df = pd.DataFrame(columns=["実験ID", "条件1", "結果"])
     df.to_csv(CSV_FILE, index=False, encoding="utf-8")
 
 # =========================
@@ -74,7 +73,6 @@ with tab1:
 
     with st.form("csv_form"):
         conditions = []
-        # 最初は条件1のみを表示、追加されたらその数だけ表示
         for i in range(st.session_state.num_conditions):
             val = st.number_input(f"⚙️ 条件{i+1}", step=1.0, format="%.2f", key=f"cond_{i}")
             conditions.append(val)
@@ -82,6 +80,13 @@ with tab1:
         add_condition = st.form_submit_button("＋ 条件を追加")
         if add_condition:
             st.session_state.num_conditions += 1
+            # CSVの列も拡張する
+            df = pd.read_csv(CSV_FILE)
+            for i in range(st.session_state.num_conditions):
+                col = f"条件{i+1}"
+                if col not in df.columns:
+                    df[col] = np.nan
+            df.to_csv(CSV_FILE, index=False, encoding="utf-8")
             st.experimental_rerun()
 
         result_val = st.number_input("📊 結果", step=1.0, format="%.2f")
