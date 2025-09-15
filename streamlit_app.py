@@ -155,9 +155,13 @@ with tab2:
                     # スペースを選択した条件だけで構築
                     space = [Real(min(df_valid[col]), max(df_valid[col]), name=col) for col in selected_conditions]
 
+                    # ダミー目的関数（必須だが呼ばれない想定）
+                    def dummy_func(x):
+                        return 0.0
+
                     # gp_minimize を実データで直接学習
                     res = gp_minimize(
-                        func=None,
+                        func=dummy_func,
                         dimensions=space,
                         x0=X,
                         y0=y,
