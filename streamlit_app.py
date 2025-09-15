@@ -1,10 +1,11 @@
 import streamlit as st
 import pandas as pd
-from datetime import date
+from datetime import date, datetime
 import os
 from skopt import gp_minimize
 from skopt.space import Real
 import matplotlib.pyplot as plt
+import seaborn as sns
 
 # 保存先ファイル
 NOTE_FILE = "notes.csv"
@@ -12,11 +13,11 @@ CSV_FILE = "experiment_data.csv"
 
 # 初期化
 if not os.path.exists(NOTE_FILE):
-    df = pd.DataFrame(columns=["日付", "目的", "結果", "考察"])
+    df = pd.DataFrame(columns=["実験ID", "日付", "目的", "結果", "考察"])
     df.to_csv(NOTE_FILE, index=False, encoding="utf-8")
 
 if not os.path.exists(CSV_FILE):
-    df = pd.DataFrame(columns=["条件", "結果"])
+    df = pd.DataFrame(columns=["実験ID", "条件1", "条件2", "条件3", "結果"])
     df.to_csv(CSV_FILE, index=False, encoding="utf-8")
 
 # ページ設定
@@ -40,67 +41,58 @@ with tab1:
         submitted = st.form_submit_button("保存")
 
         if submitted:
+            notes_df = pd.read_csv(NOTE_FILE)
+            exp_id = f"{date.today().strftime('%Y%m%d')}-{len(notes_df)+1:02d}"
             new_note = pd.DataFrame([{
+                "実験ID": exp_id,
                 "日付": str(date.today()),
                 "目的": purpose,
                 "結果": result_text,
                 "考察": discussion
             }])
-            df = pd.read_csv(NOTE_FILE)
-            df = pd.concat([df, new_note], ignore_index=True)
-            df.to_csv(NOTE_FILE, index=False, encoding="utf-8")
-            st.success("✅ 実験ノートを保存しました！")
+            notes_df = pd.concat([notes_df, new_note], ignore_index=True)
+            notes_df.to_csv(NOTE_FILE, index=False, encoding="utf-8")
+            st.success(f"✅ 実験ノートを保存しました！（ID: {exp_id}）")
 
     st.subheader("📒 実験ノート一覧")
     notes = pd.read_csv(NOTE_FILE)
     st.dataframe(notes)
 
-    # ノート削除
-    if not notes.empty:
-        delete_index = st.number_input("削除するノートの番号を指定", min_value=0, max_value=len(notes)-1, step=1)
-        if st.button("🗑️ 削除"):
-            notes = notes.drop(delete_index).reset_index(drop=True)
-            notes.to_csv(NOTE_FILE, index=False, encoding="utf-8")
-            st.success("✅ 指定したノートを削除しました")
-
-    # --- エクスポート機能 ---
-    st.download_button("⬇️ 実験ノートをTXTとしてエクスポート",
-                       data=notes.to_string(index=False),
-                       file_name="notes.txt")
-
+    # --- 条件と結果を記入 ---
     st.subheader("条件と結果を記入 (CSV用)")
     with st.form("csv_form"):
-        condition = st.number_input("⚙️ 条件", step=1.0, format="%.2f")
+        condition1 = st.number_input("⚙️ 条件1", step=1.0, format="%.2f")
+        condition2 = st.number_input("⚙️ 条件2", step=1.0, format="%.2f")
+        condition3 = st.number_input("⚙️ 条件3", step=1.0, format="%.2f")
         result_val = st.number_input("📊 結果", step=1.0, format="%.2f")
-        x_label = st.text_input("X軸ラベル", "条件")
-        y_label = st.text_input("Y軸ラベル", "結果")
-        graph_title = st.text_input("グラフタイトル", "条件 vs 結果")
 
         submitted_csv = st.form_submit_button("CSVに保存")
 
         if submitted_csv:
-            new_data = pd.DataFrame([{"条件": condition, "結果": result_val}])
-            df = pd.read_csv(CSV_FILE)
-            df = pd.concat([df, new_data], ignore_index=True)
-            df.to_csv(CSV_FILE, index=False, encoding="utf-8")
-            st.success("✅ 条件と結果を保存しました！")
+            data_df = pd.read_csv(CSV_FILE)
+            exp_id = f"{date.today().strftime('%Y%m%d')}-{len(data_df)+1:02d}"
+            new_data = pd.DataFrame([{
+                "実験ID": exp_id,
+                "条件1": condition1,
+                "条件2": condition2,
+                "条件3": condition3,
+                "結果": result_val
+            }])
+            data_df = pd.concat([data_df, new_data], ignore_index=True)
+            data_df.to_csv(CSV_FILE, index=False, encoding="utf-8")
+            st.success(f"✅ 条件と結果を保存しました！（ID: {exp_id}）")
 
     st.subheader("📑 実験データ (CSV)")
     data = pd.read_csv(CSV_FILE)
     st.dataframe(data)
 
-    # --- エクスポート機能 ---
-    st.download_button("⬇️ 実験データをCSVとしてエクスポート",
-                       data=data.to_csv(index=False, encoding="utf-8"),
-                       file_name="experiment_data.csv")
-
     # --- グラフ描画 ---
     if not data.empty:
         fig, ax = plt.subplots()
-        ax.scatter(data["条件"], data["結果"], c="blue")
-        ax.set_xlabel(x_label)
-        ax.set_ylabel(y_label)
-        ax.set_title(graph_title)
+        ax.scatter(data["条件1"], data["結果"], c="blue")
+        ax.set_xlabel("条件1")
+        ax.set_ylabel("結果")
+        ax.set_title("条件1 vs 結果")
         st.pyplot(fig)
 
 # =========================
@@ -111,42 +103,74 @@ with tab2:
 
     df = pd.read_csv(CSV_FILE)
 
-    # 探索方法の選択
     mode = st.radio("最適化の目的を選択", ["最大化", "最小化"])
 
     if df.empty or len(df) < 3:
         st.warning("📉 データ点数が少ないです。もう少しデータを追加してください。")
     else:
         if st.button("🚀 解析スタート"):
-            X = df[["条件"]].values.tolist()
-            y = df["結果"].values.tolist()
+            X = df[["条件1", "条件2", "条件3"]].values.tolist()
+            y = df["結果"].tolist()
 
-            # 目的関数
-            def objective(x):
-                idx = min(range(len(X)), key=lambda i: abs(X[i][0] - x[0]))
-                return y[idx] if mode == "最小化" else -y[idx]
+            if mode == "最大化":
+                y = [-val for val in y]  # gp_minimizeは最小化なので符号反転
 
-            space = [Real(min(df["条件"]), max(df["条件"]), name="condition")]
-            n_calls = max(len(X) + 5, 15)
+            space = [
+                Real(min(df["条件1"]), max(df["条件1"]), name="条件1"),
+                Real(min(df["条件2"]), max(df["条件2"]), name="条件2"),
+                Real(min(df["条件3"]), max(df["条件3"]), name="条件3")
+            ]
 
             res = gp_minimize(
-                objective,
+                lambda x: None,  # 予測モデルで評価するのでダミー
                 space,
                 x0=X,
-                y0=[val if mode == "最小化" else -val for val in y],
-                n_calls=n_calls,
+                y0=y,
+                n_calls=max(len(X)+5, 20),
                 random_state=42
             )
 
-            st.success(f"🔮 提案された次の条件: {res.x[0]:.2f}")
+            proposed = res.x
+            st.success(f"🔮 提案された次の条件: 条件1={proposed[0]:.2f}, 条件2={proposed[1]:.2f}, 条件3={proposed[2]:.2f}")
 
-            # 散布図
-            fig, ax = plt.subplots()
-            ax.scatter(df["条件"], df["結果"], c="blue", label="実験データ")
-            ax.axvline(res.x[0], color="red", linestyle="--", label="提案条件")
-            ax.set_xlabel("条件")
-            ax.set_ylabel("結果")
-            ax.set_title("条件 vs 結果 (ベイズ最適化)")
-            ax.legend()
-            st.pyplot(fig)
+            # 可視化モード選択
+            viz_mode = st.radio("可視化方法", ["散布図", "ヒートマップ（条件1 vs 条件2）", "履歴曲線"])
 
+            if viz_mode == "散布図":
+                fig, ax = plt.subplots()
+                ax.scatter(df["条件1"], df["結果"], c="blue", label="実験データ")
+                ax.set_xlabel("条件1")
+                ax.set_ylabel("結果")
+                ax.set_title("条件1 vs 結果")
+                st.pyplot(fig)
+
+            elif viz_mode == "ヒートマップ（条件1 vs 条件2）":
+                if len(df) > 5:
+                    pivot_df = df.pivot_table(index="条件1", columns="条件2", values="結果", aggfunc="mean")
+                    fig, ax = plt.subplots()
+                    sns.heatmap(pivot_df, cmap="viridis", ax=ax)
+                    st.pyplot(fig)
+                else:
+                    st.warning("📉 データ点数が少ないため、ヒートマップを生成できません。")
+
+            elif viz_mode == "履歴曲線":
+                fig, ax = plt.subplots()
+                ax.plot(range(1, len(df)+1), df["結果"], marker="o")
+                ax.set_xlabel("試行回数")
+                ax.set_ylabel("結果")
+                ax.set_title("最適化履歴")
+                st.pyplot(fig)
+
+# =========================
+# 🔄 データ共有・同期機能（簡易）
+# =========================
+st.sidebar.subheader("データ共有・アップロード")
+uploaded_file = st.sidebar.file_uploader("CSVファイルをアップロード")
+if uploaded_file:
+    new_df = pd.read_csv(uploaded_file)
+    new_df.to_csv(CSV_FILE, index=False, encoding="utf-8")
+    st.sidebar.success("✅ データをアップロードしました")
+
+uploaded_img = st.sidebar.file_uploader("画像をアップロード", type=["png", "jpg", "jpeg"])
+if uploaded_img:
+    st.sidebar.image(uploaded_img, caption="アップロード画像", use_column_width=True)
